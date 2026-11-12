@@ -76,3 +76,25 @@ jobs:
       - run: |
           echo "一部の取り込みに失敗しました。build ジョブの Summary（report.md）を見てください。"
           exit 1
+
+  # 公開リポジトリは 60 日間 commit がないと、GitHub が週 1 回の自動実行を止める。
+  # それを防ぐため、毎月最初の水曜（1〜7 日）の自動実行で keepalive.txt を書き換えて commit する。
+  # GITHUB_TOKEN の commit では、このワークフローはもう一度動かない。
+  keepalive:
+    needs: deploy
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          day=$(TZ=Asia/Tokyo date +%-d)
+          if [ "$day" -gt 7 ]; then echo "今月はもう書いた（$day 日）"; exit 0; fi
+          echo "最後の自動実行の月：$(TZ=Asia/Tokyo date +%Y-%m)（60 日間 commit がないと自動実行が止まるのを防ぐためのファイル）" > keepalive.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add keepalive.txt
+          git diff --cached --quiet && exit 0
+          git commit -m "keepalive $(TZ=Asia/Tokyo date +%Y-%m)"
+          git push

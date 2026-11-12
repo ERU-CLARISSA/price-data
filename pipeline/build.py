@@ -95,19 +95,26 @@ class Builder:
             items = estat.wanted_items(classes["cat01"])
             last = max((max(s) for a in prev_data.values() for s in a.values() if s), default=None)
             since = estat.START if last is None else ((last[0], last[1] + 1) if last[1] < 12 else (last[0] + 1, 1))
-            new = estat.parse_values(estat.fetch_values([i["code"] for i in items], since))
+            self.report.append(f"  - 品目 {len(items)}、地域 {len(classes.get('area', []))}、{since[0]}-{since[1]:02d} から取る")
+            values = estat.fetch_values([i["code"] for i in items], since)
+            self.report.append(f"  - API の値 {len(values)} 件")
+            new = estat.parse_values(values)
             data = estat.merge(prev_data, new)
             n = sum(len(s) for a in data.values() for s in a.values())
             pn = sum(len(s) for a in prev_data.values() for s in a.values())
+            if n == 0:
+                raise ValueError("e-Stat から価格が 1 件も取れない")
             if pn and n < pn * SHRINK:
                 raise ValueError(f"件数が {pn} → {n} に減った")
+            names = {c["code"]: c for c in classes.get("area", [])}
+            latest = max(max(s) for a in data.values() for s in a.values() if s)
         except Exception as e:  # noqa: BLE001
             skipped = isinstance(e, estat.NoAppId) and not require
             if not skipped:
                 self.failed.append("e-Stat 都市別小売価格")
-            self.report.append(f"- {'スキップ' if skipped else '**失敗**'} e-Stat 都市別小売価格: {e}")
+            self.report.append(f"- {'スキップ' if skipped else '**失敗**'} e-Stat 都市別小売価格: {type(e).__name__}: {e}")
             if not skipped:
-                traceback.print_exc()
+                self.report.append("```\n" + traceback.format_exc()[-1500:] + "```")
             if prev_cities and prev_items:
                 self.put("estat/items.json", prev_items)
                 self.put("estat/cities.json", prev_cities)
@@ -116,8 +123,6 @@ class Builder:
                 self.report.append("  - 前回のファイルを使う")
             return None
 
-        names = {c["code"]: c for c in classes["area"]}
-        latest = max(max(s) for a in data.values() for s in a.values() if s)
         self.put("estat/items.json", {
             "schema": "estat-items/1",
             "items": [{"code": i["code"], "name": i["name"], "unit": i.get("unit"), "explanation": i.get("explanation")} for i in items],
@@ -187,11 +192,18 @@ def main() -> int:
     a = ap.parse_args()
 
     b = Builder(Path(a.out), Previous(a.previous))
-    weekly = b.single("農水省 食品価格動向調査（野菜）", "maff_weekly.json", maff_weekly.build, maff_weekly.count)
-    b.single("農水省 野菜の生育状況及び価格見通し", "outlook.json", maff_outlook.build, maff_outlook.count)
-    b.single("農水省 今週のお手頃野菜", "otoku.json", maff_otoku.build, maff_otoku.count)
-    estat_data = b.estat(a.require_estat)
-    b.seasonal(weekly, estat_data)
+    try:
+        weekly = b.single("農水省 食品価格動向調査（野菜）", "maff_weekly.json", maff_weekly.build, maff_weekly.count)
+        b.single("農水省 野菜の生育状況及び価格見通し", "outlook.json", maff_outlook.build, maff_outlook.count)
+        b.single("農水省 今週のお手頃野菜", "otoku.json", maff_otoku.build, maff_otoku.count)
+        estat_data = b.estat(a.require_estat)
+        b.seasonal(weekly, estat_data)
+    except Exception:  # noqa: BLE001  想定外のエラーも Summary に出してから止める
+        b.report.append("- **想定外のエラー（配信しない）**\n```\n" + traceback.format_exc() + "```")
+        Path(a.out).mkdir(parents=True, exist_ok=True)
+        (Path(a.out) / "report.md").write_text("## price-data\n\n" + "\n".join(b.report) + "\n", encoding="utf-8")
+        print("\n".join(b.report), file=sys.stderr)
+        return 1
 
     if not b.files:
         print("配信できるファイルがない", file=sys.stderr)

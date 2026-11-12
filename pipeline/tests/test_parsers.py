@@ -52,9 +52,9 @@ class Seasonal(unittest.TestCase):
 class Estat(unittest.TestCase):
     def test_values_and_series(self):
         vals = [
-            {"@cat01": "01401", "@area": "13100", "@time": "2026000909", "$": "250"},
-            {"@cat01": "01401", "@area": "13100", "@time": "2026000707", "$": "1,230"},
-            {"@cat01": "01401", "@area": "13100", "@time": "2026000808", "$": "-"},
+            {"@cat02": "01401", "@area": "13100", "@time": "2026000909", "$": "250"},
+            {"@cat02": "01401", "@area": "13100", "@time": "2026000707", "$": "1,230"},
+            {"@cat02": "01401", "@area": "13100", "@time": "2026000808", "$": "-"},
         ]
         d = estat.parse_values(vals)
         s = d["13100"]["01401"]
@@ -63,6 +63,10 @@ class Estat(unittest.TestCase):
         self.assertEqual(j, {"start": "2026-07", "values": [1230, None, 250]})
         self.assertEqual(estat.series_from_json(j), s)
         self.assertEqual(estat.time_code(2000, 1), "2000000101")
+
+    def test_item_class(self):
+        classes = {"tab": [1], "cat01": [{"code": "0020"}], "cat02": [{"code": "01401"}, {"code": "01402"}], "area": [1, 2, 3], "time": [1]}
+        self.assertEqual(estat.item_class(classes), "cat02")
 
 
 if __name__ == "__main__":

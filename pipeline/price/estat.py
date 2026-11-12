@@ -1,7 +1,7 @@
 """総務省 小売物価統計調査「主要品目の都市別小売価格」（e-Stat API 3.0、月次）。
 
 表 ID 0003421913：都道府県庁所在市及び人口15万以上の市（2000年1月～）。
-- 品目（cat01）：5 桁（例 01401 キャベツ）。全 872、うち食料（01xxx）256。調査終了の品目は名前に【…調査終了】。
+- 品目（cat02。cat01 は「価格」1 つだけ）：5 桁（例 01401 キャベツ）。全 872、うち食料（01xxx）256。調査終了の品目は名前に【…調査終了】。
 - 地域（area）：市区町村コード 5 桁（例 13100 特別区部）。95（うち掲載終了・旧市を含む）。
 - 時間（time）：10 桁（例 2026000909 = 2026年9月）。
 appId は環境変数 ESTAT_APP_ID（GitHub の Secrets）。コードやアプリには書かない。
@@ -65,25 +65,33 @@ def parse_time(code: str) -> tuple[int, int]:
     return int(code[0:4]), int(code[6:8])
 
 
-def parse_values(values: list[dict]) -> dict[str, dict[str, dict[tuple[int, int], int]]]:
+def item_class(classes: dict) -> str:
+    """品目の分類の id（cat01・cat02…のうち一番数が多いもの。この表では cat02）。"""
+    cats = [k for k in classes if k.startswith("cat")]
+    if not cats:
+        raise ValueError(f"品目の分類が見つからない: {list(classes)}")
+    return max(cats, key=lambda k: len(classes[k]))
+
+
+def parse_values(values: list[dict], cls: str = "cat02") -> dict[str, dict[str, dict[tuple[int, int], int]]]:
     """VALUE の並び → {地域: {品目: {(年, 月): 円}}}。「-」「…」「***」などは捨てる。"""
     out: dict = {}
     for v in values:
         raw = str(v.get("$", "")).replace(",", "")
         if not re.fullmatch(r"\d+(\.\d+)?", raw):
             continue
-        out.setdefault(v["@area"], {}).setdefault(v["@cat01"], {})[parse_time(v["@time"])] = int(round(float(raw)))
+        out.setdefault(v["@area"], {}).setdefault(v[f"@{cls}"], {})[parse_time(v["@time"])] = int(round(float(raw)))
     return out
 
 
-def fetch_values(items: list[str], since: tuple[int, int]) -> list[dict]:
+def fetch_values(items: list[str], since: tuple[int, int], cls: str = "cat02") -> list[dict]:
     """品目を 100 ずつに分け、NEXT_KEY でページを送りながら全部取る。"""
     values = []
     for i in range(0, len(items), 100):
         start = 1
         while True:
             root = call(
-                "getStatsData", statsDataId=STATS_ID, cdCat01=",".join(items[i:i + 100]),
+                "getStatsData", statsDataId=STATS_ID, **{f"cd{cls.capitalize()}": ",".join(items[i:i + 100])},
                 cdTimeFrom=time_code(*since), startPosition=start, limit=100000,
                 metaGetFlg="N", cntGetFlg="N", sectionHeaderFlg="2",
             )

@@ -92,13 +92,14 @@ class Builder:
                     prev_data[c["code"]] = {k: estat.series_from_json(v) for k, v in j["items"].items()}
         try:
             classes = estat.meta()
-            items = estat.wanted_items(classes["cat01"])
+            cls = estat.item_class(classes)
+            items = estat.wanted_items(classes[cls])
             last = max((max(s) for a in prev_data.values() for s in a.values() if s), default=None)
             since = estat.START if last is None else ((last[0], last[1] + 1) if last[1] < 12 else (last[0] + 1, 1))
-            self.report.append(f"  - 品目 {len(items)}、地域 {len(classes.get('area', []))}、{since[0]}-{since[1]:02d} から取る")
-            values = estat.fetch_values([i["code"] for i in items], since)
+            self.report.append(f"  - 品目（{cls}）{len(items)}、地域 {len(classes.get('area', []))}、{since[0]}-{since[1]:02d} から取る")
+            values = estat.fetch_values([i["code"] for i in items], since, cls)
             self.report.append(f"  - API の値 {len(values)} 件")
-            new = estat.parse_values(values)
+            new = estat.parse_values(values, cls)
             data = estat.merge(prev_data, new)
             n = sum(len(s) for a in data.values() for s in a.values())
             pn = sum(len(s) for a in prev_data.values() for s in a.values())

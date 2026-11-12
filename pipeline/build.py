@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import sys
 import traceback
@@ -18,7 +19,7 @@ from pathlib import Path
 
 import requests
 
-from price import estat, maff_otoku, maff_outlook, maff_weekly, seasonal
+from price import estat, estat_items, maff_otoku, maff_outlook, maff_weekly, seasonal
 
 SHRINK = 0.8  # 前回のこの割合より少なければ配信しない（その元は前回分を使う）
 
@@ -56,6 +57,7 @@ class Builder:
         self.files: dict[str, bytes] = {}
         self.report: list[str] = []
         self.failed: list[str] = []
+        self.item_months: dict[str, list[int]] = {}
 
     def put(self, rel: str, doc) -> None:
         self.files[rel] = dump(doc)
@@ -124,13 +126,27 @@ class Builder:
                 self.report.append("  - 前回のファイルを使う")
             return None
 
+        meta = self.item_meta(prev_items)
+        self.item_months = {c: m["months"] for c, m in meta.items() if m.get("months")}
         self.put("estat/items.json", {
-            "schema": "estat-items/1",
-            "items": [{"code": i["code"], "name": i["name"], "unit": i.get("unit"), "explanation": i.get("explanation")} for i in items],
+            "schema": "estat-items/2",
+            "note": "価格は unit あたり。months は季節品の調査月（null は通年）。銘柄は総務省統計局「調査品目及び基本銘柄」",
+            "items": [{
+                "code": i["code"],
+                "name": re.sub(r"^\d+\s*", "", i["name"]),
+                "unit": meta.get(i["code"], {}).get("unit"),
+                "brand": meta.get(i["code"], {}).get("brand"),
+                "months": meta.get(i["code"], {}).get("months"),
+            } for i in items],
         })
         self.put("estat/cities.json", {
             "schema": "estat-cities/1",
-            "cities": [{"code": a, "name": names.get(a, {}).get("name", a)} for a in sorted(data)],
+            "note": "last は値のある最後の月。調査が終わった市・旧市も含むので、アプリは last が新しい市から選ぶ",
+            "cities": [{
+                "code": a,
+                "name": names.get(a, {}).get("name", a),
+                "last": "%04d-%02d" % max(max(s) for s in data[a].values() if s),
+            } for a in sorted(data)],
         })
         for a in sorted(data):
             self.put(f"estat/city/{a}.json", {
@@ -141,6 +157,20 @@ class Builder:
             })
         self.report.append(f"- OK e-Stat 都市別小売価格: {len(data)} 市、{n} 件（前回 {pn}）、{latest[0]}-{latest[1]:02d} まで")
         return data
+
+    def item_meta(self, prev_items: dict | None) -> dict[str, dict]:
+        """単位・銘柄・調査月。取れなければ前回の items.json の値を使う。"""
+        try:
+            url, meta = estat_items.build()
+            self.report.append(f"- OK 統計局 調査品目及び基本銘柄: {len(meta)} 品目（{url}）")
+            return meta
+        except Exception as e:  # noqa: BLE001
+            self.failed.append("統計局 調査品目及び基本銘柄")
+            self.report.append(f"- **失敗** 統計局 調査品目及び基本銘柄: {e}")
+            if prev_items and prev_items.get("schema") == "estat-items/2":
+                self.report.append("  - 前回の単位・調査月を使う")
+                return {i["code"]: i for i in prev_items["items"]}
+            return {}
 
     def seasonal(self, weekly: dict | None, estat_data: dict | None) -> None:
         doc = {"schema": "seasonal/1", "method": "各年の価格をその年の平均で割った指数を月ごとに平均。"
@@ -159,7 +189,7 @@ class Builder:
                     for ym, v in s.items():
                         acc.setdefault(i, {}).setdefault(ym, []).append(v)
             for i in sorted(acc):
-                r = seasonal.index({ym: sum(v) / len(v) for ym, v in acc[i].items()})
+                r = seasonal.index({ym: sum(v) / len(v) for ym, v in acc[i].items()}, self.item_months.get(i))
                 if r:
                     doc["estat_national"][i] = r
         elif (p := self.prev.get("seasonal.json")):

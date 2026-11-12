@@ -97,6 +97,7 @@ def fetch_values(items: list[str], since: tuple[int, int], cls: str = "cat02") -
             )
             data = root.get("STATISTICAL_DATA", {})
             values += as_list(data.get("DATA_INF", {}).get("VALUE"))
+            print(f"e-Stat: 品目 {i + 1}〜{min(i + 100, len(items))}/{len(items)}、{start} 件目から、累計 {len(values)} 件", flush=True)
             nxt = data.get("RESULT_INF", {}).get("NEXT_KEY")
             if not nxt:
                 break

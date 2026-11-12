@@ -11,6 +11,7 @@ from statistics import mean
 MIN_MONTHS = 10      # 1 年のうち値のある月がこれ未満の年は使わない（欠けの多い年）
 MIN_YEARS = 3        # 使える年がこれ未満なら傾向を出さない
 CHEAP = 0.95         # 指数がこれ以下の月を「安くなりやすい月」とする
+MAX_CHEAP = 4        # 通年の品目の「安くなりやすい月」は、低い順にこの数まで
 
 
 def monthly_from_points(points: list[tuple[str, float]]) -> dict[tuple[int, int], float]:
@@ -21,12 +22,15 @@ def monthly_from_points(points: list[tuple[str, float]]) -> dict[tuple[int, int]
     return {k: mean(v) for k, v in acc.items()}
 
 
-def index(monthly: dict[tuple[int, int], float]) -> dict | None:
+def index(monthly: dict[tuple[int, int], float], months: list[int] | None = None) -> dict | None:
+    """months：季節品の調査月（例 すいか [5,6,7,8]）。その月だけで指数を作る（指数はその季節の平均との比）。"""
+    season = set(months) if months else None
+    need = max(2, len(season) - 1) if season else MIN_MONTHS
     by_year: dict[int, dict[int, float]] = defaultdict(dict)
     for (y, m), v in monthly.items():
-        if v and v > 0:
+        if v and v > 0 and (season is None or m in season):
             by_year[y][m] = v
-    years = sorted(y for y, ms in by_year.items() if len(ms) >= MIN_MONTHS)
+    years = sorted(y for y, ms in by_year.items() if len(ms) >= need)
     if len(years) < MIN_YEARS:
         return None
     per_month: dict[int, list[float]] = defaultdict(list)
@@ -36,13 +40,16 @@ def index(monthly: dict[tuple[int, int], float]) -> dict | None:
             per_month[m].append(v / avg)
     idx = [round(mean(per_month[m]), 3) if per_month[m] else None for m in range(1, 13)]
     vals = [v for v in idx if v is not None]
-    cheap = [m for m, v in enumerate(idx, 1) if v is not None and v <= CHEAP]
+    limit = max(1, round(len(vals) / 3)) if season else MAX_CHEAP
+    low = sorted((v, m) for m, v in enumerate(idx, 1) if v is not None)
+    cheap = sorted(m for v, m in low[:limit] if v <= CHEAP)
     if not cheap:  # 差が小さい品目は一番低い月だけ
-        cheap = [idx.index(min(vals)) + 1]
+        cheap = [low[0][1]]
     return {
         "index": idx,
         "cheap_months": cheap,
         "years": [years[0], years[-1]],
         "n_years": len(years),
         "amplitude": round(max(vals) - min(vals), 3),
+        **({"season": sorted(season)} if season else {}),
     }

@@ -1,6 +1,6 @@
 import unittest
 
-from price import estat, maff_otoku, maff_outlook, seasonal, wareki
+from price import estat, estat_items, maff_otoku, maff_outlook, seasonal, wareki
 
 
 class Wareki(unittest.TestCase):
@@ -47,6 +47,25 @@ class Seasonal(unittest.TestCase):
     def test_sparse_years_dropped(self):
         monthly = {(2020, m): 100 for m in range(1, 6)}  # 5 か月しかない
         self.assertIsNone(seasonal.index(monthly))
+
+
+class SeasonalItems(unittest.TestCase):
+    def test_months(self):
+        self.assertEqual(estat_items.months_of("国産品 １月～５月，\n１２月"), [1, 2, 3, 4, 5, 12])
+        self.assertEqual(estat_items.months_of("温州みかん ９月～３月"), [1, 2, 3, 9, 10, 11, 12])
+        self.assertIsNone(estat_items.months_of("1個190～260g"))
+
+    def test_seasonal_item_index(self):
+        # すいか（5〜8 月だけ）：7 月が安い
+        monthly = {(y, m): (80 if m == 7 else 100) * (1 + 0.05 * (y - 2010)) for y in range(2010, 2016) for m in (5, 6, 7, 8)}
+        r = seasonal.index(monthly, [5, 6, 7, 8])
+        self.assertEqual(r["cheap_months"], [7])
+        self.assertEqual(r["index"][0], None)
+        self.assertEqual(r["season"], [5, 6, 7, 8])
+
+    def test_cheap_months_capped(self):
+        monthly = {(y, m): (50 if m <= 7 else 150) for y in range(2010, 2015) for m in range(1, 13)}
+        self.assertEqual(len(seasonal.index(monthly)["cheap_months"]), 4)
 
 
 class Estat(unittest.TestCase):

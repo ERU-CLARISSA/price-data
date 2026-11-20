@@ -62,13 +62,14 @@ class Builder:
     def put(self, rel: str, doc) -> None:
         self.files[rel] = dump(doc)
 
-    def single(self, name: str, rel: str, build, count) -> dict | None:
-        """1 ファイルの取り込み元。失敗・大きく減ったら前回のファイルを使う。"""
+    def single(self, name: str, rel: str, build, count, shrink: float = SHRINK) -> dict | None:
+        """1 ファイルの取り込み元。失敗・大きく減ったら（前回の shrink 倍未満）前回のファイルを使う。
+        shrink=0 なら件数では止めない（週によって数が変わる元。読めないときは build の中で失敗にする）。"""
         prev = self.prev.get(rel)
         try:
             doc = build()
             n, pn = count(doc), (count(prev) if prev else 0)
-            if prev and n < pn * SHRINK:
+            if prev and n < pn * shrink:
                 raise ValueError(f"件数が {pn} → {n} に減った")
             self.put(rel, doc)
             self.report.append(f"- OK {name}: {n} 件（前回 {pn}）、データ {doc.get('data_updated')}")
@@ -225,8 +226,10 @@ def main() -> int:
     b = Builder(Path(a.out), Previous(a.previous))
     try:
         weekly = b.single("農水省 食品価格動向調査（野菜）", "maff_weekly.json", maff_weekly.build, maff_weekly.count)
-        b.single("農水省 野菜の生育状況及び価格見通し", "outlook.json", maff_outlook.build, maff_outlook.count)
-        b.single("農水省 今週のお手頃野菜", "otoku.json", maff_otoku.build, maff_otoku.count)
+        # 見通しの品目数は月で少し変わる（15 前後）。半分未満なら書式が変わったとみる
+        b.single("農水省 野菜の生育状況及び価格見通し", "outlook.json", maff_outlook.build, maff_outlook.count, shrink=0.5)
+        # お手頃野菜の品目数は週で変わる（2026-11-13 は 3 品目、前の週は 6）。件数では止めない
+        b.single("農水省 今週のお手頃野菜", "otoku.json", maff_otoku.build, maff_otoku.count, shrink=0)
         estat_data = b.estat(a.require_estat)
         b.seasonal(weekly, estat_data)
     except Exception:  # noqa: BLE001  想定外のエラーも Summary に出してから止める

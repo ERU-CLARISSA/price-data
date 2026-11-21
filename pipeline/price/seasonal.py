@@ -31,6 +31,12 @@ def index(monthly: dict[tuple[int, int], float], months: list[int] | None = None
         if v and v > 0 and (season is None or m in season):
             by_year[y][m] = v
     years = sorted(y for y, ms in by_year.items() if len(ms) >= need)
+    # 終わっていない最後の年（例 2026 年の 1〜10 月）は、いつも最後の何か月かが欠けて傾向がずれるので使わない
+    if by_year:
+        last_y = max(by_year)
+        last_expected = max(season) if season else 12
+        if max(by_year[last_y]) < last_expected and last_y in years:
+            years.remove(last_y)
     if len(years) < MIN_YEARS:
         return None
     per_month: dict[int, list[float]] = defaultdict(list)

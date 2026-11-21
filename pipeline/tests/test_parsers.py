@@ -44,6 +44,14 @@ class Seasonal(unittest.TestCase):
         self.assertEqual(r["n_years"], 5)
         self.assertAlmostEqual(r["index"][1] / r["index"][0], 0.8, places=2)
 
+    def test_unfinished_last_year_dropped(self):
+        # 2015〜2019 は 12 か月、2020 は 1〜10 月だけ → 2020 は使わない
+        monthly = {(y, m): 100 for y in range(2015, 2020) for m in range(1, 13)}
+        monthly.update({(2020, m): 100 for m in range(1, 11)})
+        r = seasonal.index(monthly)
+        self.assertEqual(r["years"], [2015, 2019])
+        self.assertEqual(r["n_years"], 5)
+
     def test_sparse_years_dropped(self):
         monthly = {(2020, m): 100 for m in range(1, 6)}  # 5 か月しかない
         self.assertIsNone(seasonal.index(monthly))
